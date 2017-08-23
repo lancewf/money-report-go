@@ -1,0 +1,379 @@
+#!/bin/bash
+
+# The `TEST` environment variable comes from our `.travis.yml`
+# so if we have that set we are sourcing from Travis therefor
+# we do not want to source the plan.sh and travis should pass
+# the `TOML_FILE` env variable to read from the config
+[[ -z "${TEST}" ]] && source /src/habitat/plan.sh
+[[ -z "${TEST}" ]] && export TOML_FILE=/src/habitat/default.toml
+
+export PORT=$(cat $TOML_FILE | grep port | awk '{ print $NF }')
+export HOST=$(cat $TOML_FILE | grep host | awk '{ print $NF }' | tr -d '"')
+# If the `cfg.service.host` setting is empty, default to `converge-service`
+[[ "${HOST}" == "" ]] && export HOST="money-report"
+export ELASTICSEARCH_URL=$(cat $TOML_FILE | grep url | awk '{ print $NF }'| tr -d '"')
+export ES_PORT=$(echo $ELASTICSEARCH_URL | awk -F: '{ print $NF }')
+export ES_HOST=$(echo $ELASTICSEARCH_URL | awk -F: '{ print $2 }' | tr -d '/')
+
+# Place any dependencies need for development only in the following array.
+dev_dependencies=(
+  core/curl
+  core/node
+  core/coreutils
+  core/bundler
+  core/ruby
+  core/go
+  core/git
+  ${pkg_deps[@]}
+  ${pkg_build_deps[@]}
+  ${pkg_scaffolding}
+)
+
+# This function will install elasticsearch in our studio
+function install_elasticsearch() {
+  # Lets link the `netstat` binary from busybox-static so we can
+  # wait for the port to be listening and sysctl to disable ipv6
+  hab pkg binlink core/busybox-static netstat
+  hab pkg binlink core/busybox-static sysctl
+  # elastic won't come up without this mount point
+  mount --bind / /
+  # Disable ipv6
+  sysctl -w net.ipv6.conf.all.disable_ipv6=1
+  # install elasticsearch package
+  hab svc start core/elasticsearch --strategy at-once
+  # wait for elasticsearch to come online
+  wait_for_port_to_listen $ES_PORT 
+  # configure elasticsearch host inside our studio
+  configure_host $ES_HOST $ES_PORT
+}
+
+# Reconfigure elasticsearch to listen to localhost:9200
+function apply_elasticsearch_config() {
+  hab apply elasticsearch.default $(date +%s) <<-EOF
+[network]
+host = ["_local_", "_site_"]
+EOF
+}
+
+# Helper function to wait for a port to be listening
+#
+# @(arg:1) Port to wait for to be listening
+# @(arg:2) Wheter or not this process runs silently
+function wait_for_port_to_listen() {
+  while : ; do
+    netstat -an | grep $1 | grep LISTEN >/dev/null 2>/dev/null
+    [[ $? -eq 0 ]] && break || sleep 1
+    [[ "$2" != "silent" ]] && echo " => Waiting for port $1 to be listening"
+  done
+}
+
+# This function will configure a host inside our studio, it will modify
+# the /etc/hosts with $1 as the hostname and it will use $2 to find the
+# ipaddress that the port is bound to.
+function configure_host() {
+  # Verify if we have already added the host to /etc/hosts
+  grep -w $1 /etc/hosts >/dev/null
+  [[ $? -eq 0 ]] && return
+  # Find the ipaddress that the port is bound to
+  BIND_ADDRESS=$(netstat -an | grep $2 | grep LISTEN | awk '{ print $4 }')
+  echo "hosts: files dns" > /etc/nsswitch.conf
+  echo "$(echo $BIND_ADDRESS | cut -f1 -d:) $1" >> /etc/hosts
+}
+
+# Helper function to wait for services to come online
+function wait_for_service() {
+  while : ; do
+    curl $1 >/dev/null 2>/dev/null
+    [[ $? -eq 0 ]] && break || sleep 1
+    echo " => Waiting for $1 to come online"
+  done
+}
+
+# This function installs all the dev env dependencies in the above array. This
+# should be relatively fast after the first time since we are mounting the local
+# habitat cache in the studio.
+function install_dev_dependencies() {
+  for i in "${dev_dependencies[@]}"
+  do
+    hab install $i -b
+  done
+}
+
+function update_service() {
+  go_build && native_service_restart
+}
+
+function native_service_restart {
+  export PID=$(grep_pid)
+  if [[ ! -z ${PID} ]]; then
+    kill $PID
+  fi
+  $GO_PKG_SRC/$pkg_name start --elasticsearch-url $ELASTICSEARCH_URL &
+}
+
+# Start the service, wait for it to come online and configure the host,
+# this process requires to first run `build` to build a habitat package
+function start {
+  hab svc start $HAB_ORIGIN/$pkg_name --strategy at-once --bind elasticsearch:elasticsearch.default
+  # wait for our service to start listening
+  wait_for_port_to_listen $PORT
+  # configure the converge-service host inside our studio
+  configure_host $HOST $PORT
+}
+
+function dev_help {
+  cat <<DEVHELP
+Welcome to the Habitat-based development environment for the Money Report Service.
+
+Studio help:
+
+dev_help
+  Display this message.
+setup_dev_environment
+  Setup the studio as a development environment by installing dev dependencies
+  such as elasticsearch
+build
+  This will build the money-report habitat package for your origin.
+start
+  This will start the money report service built above in the Habitat supervisor
+  as a transient service and configure it so it will be updated when you
+  build new package.
+    Runs:
+    => hab svc start $HAB_ORIGIN/$pkg_name --strategy at-once --bind elasticsearch:elasticsearch.default
+update_service
+  For a faster development cycle use this command to build and start
+  the money report natively, note that this won't use habitat.
+go_build
+  Builds the $pkg_name binary. (a.k.a. go build)
+go_debug_mode
+  Runs the $pkg_name in debug mode inside the studio.
+go_debug_server
+  Starts a headless Delve Server to remotely debug the converge-service.
+go_debug_attach_running_service
+  Attach to a running $pkg_name and begin debugging inside the studio.
+generate_elasticsearch_data
+  Generates 100 nodes in elasticsearch for querying against.
+clean_cache
+  Cleans your habitat cache. (Removes the directory /hab/cache/src)
+
+DEVHELP
+}
+
+# Starts a headless Delve Server so that engineers that use IDE's like VS Code
+# can connect to the remote service running in our habitat studio
+#
+# This process includes:
+#   - Setting up the dev environment
+#   - Verify that the GO_PKG_SRC path exists
+#   - Start the headless Delve Server in port :2345
+#
+# There is alreay a vs code configuration checked in that the converge team
+# can use, it is stored under `.vscode/launch.json`
+function go_debug_server {
+  # Setup the studio as a dev environment if it is not already set
+  if ! ${HAB_DEV_ENV:-false}; then
+    setup_dev_environment
+  fi
+  verify_go_pkg_src
+  pushd $GO_PKG_SRC >/dev/null
+  echo "=> Starting headless Delve Server in port '*:2345'"
+  dlv debug --headless --listen=:2345 --log --build-flags "--ldflags '${GO_LDFLAGS}'" -- start --elasticsearch-url $ELASTICSEARCH_URL
+  popd >/dev/null
+}
+
+function clean_cache {
+  echo -n "You are about to remove the content of /hab/cache/src. [Enter to proceed] "
+  read
+  rm -rf /hab/cache/src
+  echo -n "You are about to remove the content of /src/vendor. [Enter to proceed] "
+  read
+  rm -rf /src/vendor
+  echo "It is highly recommended that you enter a new studio. :smile:"
+}
+
+# This function will verify that you have built the package at
+# least once so that we can leverage the GO_PKG_SRC to run go cmds
+function verify_go_pkg_src {
+  # Verify if the package source in the Go workspace exists
+  if [[ ! -e ${GO_PKG_SRC} ]]; then
+    echo "=> Unable to find Go workspace. Building it!"
+    go_build
+  fi
+}
+
+# You wanna debug your running process? Well use this function to do so.
+#
+# This process includes:
+#   - Setting up the dev environment
+#   - Verify that the GO_PKG_SRC path exists
+#   - Search for the service process id
+#   - Connect to the running service process
+function go_debug_attach_running_service {
+  # Setup the studio as a dev environment if it is not already set
+  if ! ${HAB_DEV_ENV:-false}; then
+    setup_dev_environment
+  fi
+
+  verify_go_pkg_src
+
+  export PID=$(grep_pid)
+  if [[ -z ${PID} ]]; then
+    echo "There is no $pkg_name running."
+    return
+  fi
+
+  pushd $GO_PKG_SRC >/dev/null
+  echo "=> Connection to PID '${PID}':"
+  dlv attach $PID $pkg_name --build-flags "--ldflags '${GO_LDFLAGS}'"
+  popd >/dev/null
+}
+
+# Helper function to search for the PID of the service
+function grep_pid {
+  ps | grep $pkg_name | grep -v grep | awk '{ print $1 }'
+}
+
+# This function will be your first place for debugging our service,
+# once you are inside the debug console you can set breakpoints and more.
+#
+#   Docs => https://github.com/derekparker/delve/tree/master/Documentation/cli
+function go_debug_mode {
+  # Setup the studio as a dev environment if it is not already set
+  if ! ${HAB_DEV_ENV:-false}; then
+    setup_dev_environment
+  fi
+  verify_go_pkg_src
+  pushd $GO_PKG_SRC >/dev/null
+  echo "=> Starting debug console:"
+  dlv debug --build-flags "--ldflags '${GO_LDFLAGS}'" -- start --elasticsearch-url $ELASTICSEARCH_URL
+  popd >/dev/null
+}
+
+# Run Unit tests
+function go_test {
+  # Setup the studio as a dev environment if it is not already set
+  if ! ${HAB_DEV_ENV:-false}; then
+    setup_dev_environment
+  fi
+  verify_go_pkg_src
+  pushd $GO_PKG_SRC >/dev/null
+  run_go_test
+  run_golint
+  popd >/dev/null
+}
+
+# Runs `golint` against all our packages
+function run_golint() {
+  [[ -z "${GO_PACKAGES}" ]] && export_go_packages
+  echo "=> Running Go lint"
+  for package in $GO_PACKAGES_DIR; do
+    golint $package
+  done
+}
+
+# Runs `go test -cover` against all our packages
+function run_go_test() {
+  [[ -z "${GO_PACKAGES}" ]] && export_go_packages
+  echo "=> Executing Go test"
+  go test $GO_PACKAGES -cover --ldflags "$GO_LDFLAGS"
+}
+
+# Exports the GO_PACKAGES environment variable
+function export_go_packages {
+  export GO_PACKAGES=$(go list ./... | grep -v vendor)
+  export GO_PACKAGES_DIR=$(go list -f '{{.Dir}}' ./... | grep -v vendor | awk -F'converge-service' '{ print "."$2 }')
+}
+
+function go_build {
+  # Setup the studio as a dev environment if it is not already set
+  if ! ${HAB_DEV_ENV:-false}; then
+    setup_dev_environment
+  fi
+
+  # Verify that the package source in the Go workspace exists
+  # if it doesn't lets create the directory structure and link
+  # the source code.
+  #
+  # TODO: This is a workaround to fix the error
+  # => /hab/pkgs/core/glibc/2.22/20170513201042/lib/libc.so: invalid ELF header
+  if [[ ! -e ${GO_PKG_SRC} ]]; then
+    mkdir -p "${GOPATH}/src/${scaffolding_go_base_path}"
+    ln -s /src $GO_PKG_SRC
+  fi
+
+  pushd $GO_PKG_SRC >/dev/null
+  echo "=> Executing Go generate"
+  go generate
+  echo "=> Executing Go dependecy solver"
+  dep ensure
+  echo "=> Executing Go build"
+  go build --ldflags "${GO_LDFLAGS}"
+  popd >/dev/null
+}
+
+function install_go_dependencies {
+  # So we can run `go ...` commands
+  # TODO: (afiune) Figure out a way to consume the GOPATH
+  #                from scaffolding-go
+  export GOPATH=/hab/cache/src/go
+  export GO_PKG_SRC="${GOPATH}/src/${scaffolding_go_base_path}/${pkg_name}"
+  export PATH=$GOPATH/bin:$PATH
+  export CC=$(hab pkg path core/musl)/bin/musl-gcc
+  export GO_LDFLAGS="-linkmode external -extldflags '-static'"
+
+  # Lets link the 'ps' binary from busybox-static so we can
+  # attach to a running converge-service
+  # TODO: Do we want everything tha comes inside busybox?
+  hab pkg binlink core/busybox-static ps
+  # Also 'gcc' to pull down static linked binaries
+  hab pkg binlink core/gcc gcc
+
+  mkdir -p $GOPATH
+  pushd $GOPATH >/dev/null
+  clean_go_binaries
+  run_go_get_dependencies
+  popd >/dev/null
+}
+
+function clean_go_binaries() {
+  [[ -z "${GOPATH}" ]] && echo "Missing GOPATH env variable" || rm -rf $GOPATH/bin/*
+}
+# Runs `go get` for all our dependencies
+function run_go_get_dependencies() {
+  echo "=> Installing 'dep' Go tool"
+  go get -u --ldflags "$GO_LDFLAGS" github.com/golang/dep/cmd/dep
+  echo "=> Installing 'golint' Go tool"
+  go get -u --ldflags "$GO_LDFLAGS" github.com/golang/lint/golint
+  echo "=> Installing 'dlv' Go debugger"
+  go get -u --ldflags "$GO_LDFLAGS" github.com/derekparker/delve/cmd/dlv
+}
+
+function setup_dev_environment {
+  # So we can run commands from habitat's bin directory
+  export PATH="/bin:$PATH"
+
+  # Install dev dependencies
+  install_dev_dependencies
+
+  # Because we MUST have elasticsearch
+  install_elasticsearch &
+
+  # Install Go dependencies incl. debugging tools
+  install_go_dependencies
+
+  # Record that the studio has been configured as a dev environment
+  export HAB_DEV_ENV=true
+}
+
+function generate_elasticsearch_data {
+  pushd /src >/dev/null
+  curl -XPUT -H "Content-Type: application/json" --upload-file data/mappings/bill-type.json $ELASTICSEARCH_URL/bill-type
+  curl -XPUT -H "Content-Type: application/json" --upload-file data/mappings/allocated-amounts.json $ELASTICSEARCH_URL/allocated-amounts
+  curl -XPUT -H "Content-Type: application/json" --upload-file data/mappings/purchase.json $ELASTICSEARCH_URL/purchases
+  go run data/database_setup.go
+  popd >/dev/null
+}
+
+# Print out the docs
+dev_help
+echo ""

@@ -1,0 +1,29 @@
+{
+  "template": "bill-type-*",
+  "settings": {
+    "index": {
+      "refresh_interval": "5s"
+    }
+  },
+  "mappings": {
+    "_default_": {
+      "_all": {
+        "enabled": false
+      }
+    },
+    "all": {
+      "dynamic": false,
+      "properties": {
+        "key": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "keyword"
+        },
+        "description": {
+          "type": "text"
+        }
+      }
+    }
+  }
+}

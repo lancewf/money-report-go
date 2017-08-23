@@ -1,0 +1,6 @@
+[service]
+port = 1234
+backend = "elasticsearch"
+
+[elasticsearch]
+url = "http://elasticsearch:9200"

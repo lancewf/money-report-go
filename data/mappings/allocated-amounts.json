@@ -1,0 +1,32 @@
+{
+  "template": "allocated-amounts-*",
+  "settings": {
+    "index": {
+      "refresh_interval": "5s"
+    }
+  },
+  "mappings": {
+    "_default_": {
+      "_all": {
+        "enabled": false
+      }
+    },
+    "all": {
+      "dynamic": false,
+      "properties": {
+        "amount": {
+          "type": "double"
+        },
+        "billtypekey": {
+          "type": "integer"
+        },
+        "start": {
+          "type": "date"
+        },
+        "end": {
+          "type": "date"
+        }
+      }
+    }
+  }
+}

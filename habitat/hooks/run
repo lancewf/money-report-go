@@ -1,0 +1,23 @@
+#!{{pkgPathFor "core/bash"}}/bin/bash
+
+exec 2>&1
+
+# If we have a config pointing to an specific host, lets use it,
+# otherwise use the ipaddress of the server
+{{~#if cfg.service.host}}
+CONFIG="--port {{cfg.service.port}} --host {{cfg.service.host}}"
+{{else}}
+CONFIG="--port {{cfg.service.port}} --host {{sys.ip}}"
+{{~/if}}
+
+# If we have an elasticsearch in our gossip protocol, lets detect it and use it
+# as our backend mechanism, otherwise use the defaults conming from the default.toml
+{{~#eachAlive bind.elasticsearch.members as |member|}}
+ELASTICSEARCH_URL="http://{{member.sys.ip}}:{{member.cfg.http-port}}"
+BACKEND="--backend elasticsearch --elasticsearch-url $ELASTICSEARCH_URL"
+{{~else}}
+BACKEND="--backend {{cfg.service.backend}} --elasticsearch-url {{cfg.elasticsearch.url}}"
+{{~/eachAlive}}
+
+# Start our service
+exec converge-service start ${CONFIG} ${BACKEND}
