@@ -2,135 +2,63 @@ package main
 
 import (
 	"fmt"
-	"reflect"
-	"time"
+	"os"
 
-	"github.com/gin-gonic/gin"
-	"github.com/lancewf/money-report-go/data"
-	elastic "gopkg.in/olivere/elastic.v5"
+	"github.com/lancewf/money-report-go/config"
+	"github.com/lancewf/money-report-go/server"
+	"github.com/urfave/cli"
 )
 
-type BillTypeResponse struct {
-	Key         int    `json:"key"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-}
-
-type PurchaseResponseEs struct {
-	Store       string    `json:"store"`
-	Cost        float32   `json:"cost"`
-	Notes       string    `json:"notes"`
-	Billtypekey int       `json:"billtypekey"`
-	Date        time.Time `json:"date"`
-}
-
 func main() {
-	//esURL := os.Getenv("ELASTICSEARCH_URL")
-    esURL := "http://elasticsearch:9200/"
-	fmt.Printf("esURL: %s\n", esURL)
-	fmt.Println("loading ES...")
+	app := cli.NewApp()
+	app.Name = "Money-Report"
+	app.Usage = "Money Report API Service"
+	app.Copyright = "None"
+	app.Version = "0.0.1"
+	app.Commands = []cli.Command{
+		// Start Command
+		{
+			Name:   "start",
+			Usage:  "Starts the Money Report API service",
+			Action: startServer,
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:  "es-url",
+					Value: "http://elasticsearch:9200/",
+					Usage: "Url to ElasticSearch (<protocol>://domain:<port>)/",
+				},
+				cli.IntFlag{
+					Name:  "port",
+					Value: 1234,
+					Usage: "Port where the service will be listening",
+				},
+				cli.StringFlag{
+					Name:  "host",
+					Value: "0.0.0.0",
+					Usage: "The ipaddress the service will be bound",
+				},
+				cli.StringFlag{
+					Name:  "old-url",
+					Value: "http://example.com",
+					Usage: "The old running money programs base URL",
+				},
+			},
+		},
+	}
 
-	data.LoadData(esURL)
-
-	fmt.Println("starting server")
-	r := gin.Default()
-	r.GET("/bill_types", test)
-	r.GET("/purchases", purchaseSearch)
-	r.Run("0.0.0.0:1234")
+	app.Run(os.Args)
 }
 
-func purchaseSearch(c *gin.Context) {
-	start := c.DefaultQuery("start", "")
-	end := c.DefaultQuery("end", "")
-	billTypeKey := c.DefaultQuery("bill_type", "-1")
-	costGte := c.DefaultQuery("cost_gte", "none")
-	costLt := c.DefaultQuery("cost_lt", "none")
+func startServer(ctx *cli.Context) error {
 
-	esURL := "http://elasticsearch:9200/"
+	cfg := config.GetDefault()
+	cfg.ElasticsearchURL = ctx.String("es-url")
+	cfg.Port = ctx.Int("port")
+	cfg.Host = ctx.String("host")
+	cfg.OldURL = ctx.String("old-url")
+	fmt.Printf("starting server %o\n", cfg)
 
-	esClient, err := elastic.NewClient(elastic.SetURL(esURL), elastic.SetSniff(false), elastic.SetHealthcheck(false))
-	if err != nil {
-		fmt.Printf("Could not create elasticsearch client %s\n", err)
-	}
+	server.Start(cfg)
 
-	bq := elastic.NewBoolQuery()
-
-	if costGte != "none" || costLt != "none" {
-		rangeQuery := elastic.NewRangeQuery("cost")
-
-		if costGte != "none" {
-			rangeQuery = rangeQuery.Gte(costGte)
-		}
-
-		if costLt != "none" {
-			rangeQuery = rangeQuery.Lt(costLt)
-		}
-
-		bq.Must(rangeQuery)
-	}
-
-	if start != "" || end != "" {
-		rangeQuery := elastic.NewRangeQuery("date")
-
-		if start != "" {
-			rangeQuery = rangeQuery.Gte(start)
-		}
-
-		if end != "" {
-			rangeQuery = rangeQuery.Lt(end)
-		}
-
-		bq.Must(rangeQuery)
-	}
-
-	if billTypeKey != "-1" {
-		bq.Must(elastic.NewTermQuery("billtypekey", billTypeKey))
-	}
-
-	searchResult, err := esClient.Search().
-		Index("purchases").
-		Query(bq).
-		Sort("date", false).
-		From(0).Size(1000).
-		Do(c) // execute
-
-	if err != nil {
-		panic(err)
-	}
-
-	var ttyp PurchaseResponseEs
-	var response []PurchaseResponseEs
-	for _, item := range searchResult.Each(reflect.TypeOf(ttyp)) {
-		if purchase, ok := item.(PurchaseResponseEs); ok {
-			response = append(response, purchase)
-		}
-	}
-
-	c.JSON(200, response)
-}
-
-func test(c *gin.Context) {
-	esURL := "http://elasticsearch:9200/"
-	esClient, err := elastic.NewClient(elastic.SetURL(esURL), elastic.SetSniff(false), elastic.SetHealthcheck(false))
-
-	if err != nil {
-		fmt.Printf("Could not create elasticsearch client %s\n", err)
-	}
-	searchResult2, err := esClient.Search().
-		Index("bill-type").
-		Do(c) // execute
-
-	if err != nil {
-		panic(err)
-	}
-
-	var ttyp BillTypeResponse
-	var response []BillTypeResponse
-	for _, item := range searchResult2.Each(reflect.TypeOf(ttyp)) {
-		if billType, ok := item.(BillTypeResponse); ok {
-			response = append(response, billType)
-		}
-	}
-
-	c.JSON(200, response)
+	return nil
 }

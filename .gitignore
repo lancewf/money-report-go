@@ -3,3 +3,4 @@ debug
 src
 vendor
 elasticsearch/data
+habitat/default.toml

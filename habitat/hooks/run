@@ -14,10 +14,12 @@ CONFIG="--port {{cfg.service.port}} --host {{sys.ip}}"
 # as our backend mechanism, otherwise use the defaults conming from the default.toml
 {{~#eachAlive bind.elasticsearch.members as |member|}}
 ELASTICSEARCH_URL="http://{{member.sys.ip}}:{{member.cfg.http-port}}"
-BACKEND="--backend elasticsearch --elasticsearch-url $ELASTICSEARCH_URL"
+DATASTORE="--es-url $ELASTICSEARCH_URL"
 {{~else}}
-BACKEND="--backend {{cfg.service.backend}} --elasticsearch-url {{cfg.elasticsearch.url}}"
+DATASTORE="--es-url {{cfg.elasticsearch.url}}"
 {{~/eachAlive}}
 
+OLD_URL="--old-url {{cfg.oldserver.oldadd}}"
+
 # Start our service
-exec money-report-go start ${CONFIG} ${BACKEND}
+exec money-report-go start ${CONFIG} ${DATASTORE} ${OLD_URL}
