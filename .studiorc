@@ -67,6 +67,14 @@ function wait_for_port_to_listen() {
   done
 }
 
+function wait_for_port_to_not_listen() {
+  while : ; do
+    netstat -an | grep $1 | grep LISTEN >/dev/null 2>/dev/null
+    [[ $? -eq 1 ]] && break || sleep 1
+    [[ "$2" != "silent" ]] && echo " => Waiting for port $1 to be not listening"
+  done
+}
+
 # This function will configure a host inside our studio, it will modify
 # the /etc/hosts with $1 as the hostname and it will use $2 to find the
 # ipaddress that the port is bound to.
@@ -119,6 +127,11 @@ function start {
   wait_for_port_to_listen $PORT
   # configure the service host inside our studio
   configure_host $HOST $PORT
+}
+
+function stop {
+  hab svc stop $HAB_ORIGIN/$pkg_name
+  wait_for_port_to_not_listen $PORT
 }
 
 function dev_help {
@@ -362,14 +375,6 @@ function setup_dev_environment {
 
   # Record that the studio has been configured as a dev environment
   export HAB_DEV_ENV=true
-}
-
-function fill_elasticsearch_data {
-  pushd /src >/dev/null
-  curl -XPUT -H "Content-Type: application/json" --upload-file data/mappings/bill-type.json $ELASTICSEARCH_URL/bill-type
-  curl -XPUT -H "Content-Type: application/json" --upload-file data/mappings/allocated-amounts.json $ELASTICSEARCH_URL/allocated-amounts
-  curl -XPUT -H "Content-Type: application/json" --upload-file data/mappings/purchase.json $ELASTICSEARCH_URL/purchases
-  popd >/dev/null
 }
 
 # Print out the docs

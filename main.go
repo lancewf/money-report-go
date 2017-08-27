@@ -1,13 +1,12 @@
 package main
 
 import (
-	"context"
 	"fmt"
-	"os"
 	"reflect"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lancewf/money-report-go/data"
 	elastic "gopkg.in/olivere/elastic.v5"
 )
 
@@ -26,6 +25,13 @@ type PurchaseResponseEs struct {
 }
 
 func main() {
+	//esURL := os.Getenv("ELASTICSEARCH_URL")
+    esURL := "http://elasticsearch:9200/"
+	fmt.Printf("esURL: %s\n", esURL)
+	fmt.Println("loading ES...")
+
+	data.LoadData(esURL)
+
 	fmt.Println("starting server")
 	r := gin.Default()
 	r.GET("/bill_types", test)
@@ -40,7 +46,7 @@ func purchaseSearch(c *gin.Context) {
 	costGte := c.DefaultQuery("cost_gte", "none")
 	costLt := c.DefaultQuery("cost_lt", "none")
 
-	esURL := os.Getenv("ELASTICSEARCH_URL")
+	esURL := "http://elasticsearch:9200/"
 
 	esClient, err := elastic.NewClient(elastic.SetURL(esURL), elastic.SetSniff(false), elastic.SetHealthcheck(false))
 	if err != nil {
@@ -86,7 +92,7 @@ func purchaseSearch(c *gin.Context) {
 		Query(bq).
 		Sort("date", false).
 		From(0).Size(1000).
-		Do(context.Background()) // execute
+		Do(c) // execute
 
 	if err != nil {
 		panic(err)
@@ -104,7 +110,7 @@ func purchaseSearch(c *gin.Context) {
 }
 
 func test(c *gin.Context) {
-	esURL := os.Getenv("ELASTICSEARCH_URL")
+	esURL := "http://elasticsearch:9200/"
 	esClient, err := elastic.NewClient(elastic.SetURL(esURL), elastic.SetSniff(false), elastic.SetHealthcheck(false))
 
 	if err != nil {
@@ -112,7 +118,7 @@ func test(c *gin.Context) {
 	}
 	searchResult2, err := esClient.Search().
 		Index("bill-type").
-		Do(context.Background()) // execute
+		Do(c) // execute
 
 	if err != nil {
 		panic(err)

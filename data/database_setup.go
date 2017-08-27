@@ -1,4 +1,4 @@
-package main
+package data
 
 import (
 	"bytes"
@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
-	"os"
 	"time"
 
 	"github.com/lancewf/money-report-go/eshelp"
@@ -57,22 +56,11 @@ type AllocatedAmountEs struct {
 	End         time.Time `json:"end"`
 }
 
-func main() {
-	esURL := os.Getenv("ELASTICSEARCH_URL")
-	fmt.Printf("esURL: %s\n", esURL)
+func LoadData(esURL string) {
 	esClient := eshelp.NewElasticSearchClient(esURL)
-
 	loadAllocatedAmounts(esClient)
 	loadBillTypes(esClient)
 	loadPurchases(esClient)
-}
-
-func readMappingFile(fileName string) string {
-	fileBytes, error := ioutil.ReadFile(fileName)
-	if error != nil {
-		panic(error)
-	}
-	return string(fileBytes)
 }
 
 func loadAllocatedAmounts(esClient *eshelp.ElasticSearchClient) {
@@ -81,12 +69,12 @@ func loadAllocatedAmounts(esClient *eshelp.ElasticSearchClient) {
 	var indexTypeName = "all"
 
 	if !esClient.IndexExists(indexName) {
-		mappingText := readMappingFile("./data/mappings/allocated-amounts.json")
 		fmt.Println("creating index")
 		esClient.CreateIndex(indexName)
 		fmt.Println("adding mapping")
-		esClient.CreateMapping(indexName, indexTypeName, mappingText)
+		esClient.CreateMapping(indexName, indexTypeName, allocatedAmountsMapping())
 
+		fmt.Println("Adding data from old site")
 		for _, a := range getAllocatedAmountsFromOldSite() {
 			start := time.Date(a.StartYear, time.Month(a.StartMonth), a.StartDayofmonth, 0, 0, 0, 0, time.UTC)
 			end := time.Date(a.EndYear, time.Month(a.EndMonth), a.EndDayofmonth, 0, 0, 0, 0, time.UTC)
@@ -120,9 +108,9 @@ func loadPurchases(esClient *eshelp.ElasticSearchClient) {
 		fmt.Println("creating index")
 		esClient.CreateIndex(indexName)
 		fmt.Println("adding mapping")
-		mappingText := readMappingFile("./data/mappings/purchase.json")
-		esClient.CreateMapping(indexName, indexTypeName, mappingText)
+		esClient.CreateMapping(indexName, indexTypeName, purchaseMapping())
 
+		fmt.Println("Adding data from old site")
 		for _, p := range getPurchasesFromOldSite() {
 			date := time.Date(p.Year, time.Month(p.Month), p.Dayofmonth, 0, 0, 0, 0, time.UTC)
 			pes := PurchaseResponseEs{p.Store, p.Cost, p.Notes, p.Billtypekey, date}
@@ -157,9 +145,9 @@ func loadBillTypes(esClient *eshelp.ElasticSearchClient) {
 		fmt.Println("creating index")
 		esClient.CreateIndex(indexName)
 		fmt.Println("adding mapping")
-		mappingText := readMappingFile("./data/mappings/bill-type.json")
-		esClient.CreateMapping(indexName, indexTypeName, mappingText)
+		esClient.CreateMapping(indexName, indexTypeName, billTypeMapping())
 
+		fmt.Println("Adding data from old site")
 		for _, bt := range getBillTypesFromOldSite(oldBillTypesURL) {
 			esClient.CreateDoc(indexName, indexTypeName, bt)
 		}
