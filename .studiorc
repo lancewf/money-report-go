@@ -164,8 +164,6 @@ go_debug_server
   Starts a headless Delve Server to remotely debug the money-report.
 go_debug_attach_running_service
   Attach to a running $pkg_name and begin debugging inside the studio.
-fill_elasticsearch_data
-  fill elasticsearch with data from the live money report.
 clean_cache
   Cleans your habitat cache. (Removes the directory /hab/cache/src)
 

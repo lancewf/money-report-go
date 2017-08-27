@@ -57,13 +57,14 @@ type AllocatedAmountEs struct {
 }
 
 func LoadData(esURL string) {
+	oldMoneyReportBaseURL := ""
 	esClient := eshelp.NewElasticSearchClient(esURL)
-	loadAllocatedAmounts(esClient)
-	loadBillTypes(esClient)
-	loadPurchases(esClient)
+	loadAllocatedAmounts(esClient, oldMoneyReportBaseURL)
+	loadBillTypes(esClient, oldMoneyReportBaseURL)
+	loadPurchases(esClient, oldMoneyReportBaseURL)
 }
 
-func loadAllocatedAmounts(esClient *eshelp.ElasticSearchClient) {
+func loadAllocatedAmounts(esClient *eshelp.ElasticSearchClient, oldMoneyReportBaseURL string) {
 	fmt.Println("Transfering AllocatedAmounts")
 	var indexName = "allocated-amounts"
 	var indexTypeName = "all"
@@ -75,7 +76,7 @@ func loadAllocatedAmounts(esClient *eshelp.ElasticSearchClient) {
 		esClient.CreateMapping(indexName, indexTypeName, allocatedAmountsMapping())
 
 		fmt.Println("Adding data from old site")
-		for _, a := range getAllocatedAmountsFromOldSite() {
+		for _, a := range getAllocatedAmountsFromOldSite(oldMoneyReportBaseURL) {
 			start := time.Date(a.StartYear, time.Month(a.StartMonth), a.StartDayofmonth, 0, 0, 0, 0, time.UTC)
 			end := time.Date(a.EndYear, time.Month(a.EndMonth), a.EndDayofmonth, 0, 0, 0, 0, time.UTC)
 			aes := AllocatedAmountEs{a.Amount, a.Billtypekey, start, end}
@@ -84,8 +85,8 @@ func loadAllocatedAmounts(esClient *eshelp.ElasticSearchClient) {
 	}
 }
 
-func getAllocatedAmountsFromOldSite() []AllocatedAmountResponse {
-	var allocatedURL = "http://moneyreport.sjcmmsn.com/index.php/services/getAllocatedAmounts"
+func getAllocatedAmountsFromOldSite(oldMoneyReportBaseURL string) []AllocatedAmountResponse {
+	var allocatedURL = oldMoneyReportBaseURL + "index.php/services/getAllocatedAmounts"
 	resp, err := http.Get(allocatedURL)
 	if err != nil {
 		panic(err)
@@ -99,7 +100,7 @@ func getAllocatedAmountsFromOldSite() []AllocatedAmountResponse {
 	return *allocatedAmounts
 }
 
-func loadPurchases(esClient *eshelp.ElasticSearchClient) {
+func loadPurchases(esClient *eshelp.ElasticSearchClient, oldMoneyReportBaseURL string) {
 	fmt.Println("Transfering PurchasesFromOldSite")
 	var indexName = "purchases"
 	var indexTypeName = "all"
@@ -111,7 +112,7 @@ func loadPurchases(esClient *eshelp.ElasticSearchClient) {
 		esClient.CreateMapping(indexName, indexTypeName, purchaseMapping())
 
 		fmt.Println("Adding data from old site")
-		for _, p := range getPurchasesFromOldSite() {
+		for _, p := range getPurchasesFromOldSite(oldMoneyReportBaseURL) {
 			date := time.Date(p.Year, time.Month(p.Month), p.Dayofmonth, 0, 0, 0, 0, time.UTC)
 			pes := PurchaseResponseEs{p.Store, p.Cost, p.Notes, p.Billtypekey, date}
 			esClient.CreateDoc(indexName, indexTypeName, pes)
@@ -120,8 +121,8 @@ func loadPurchases(esClient *eshelp.ElasticSearchClient) {
 }
 
 //{"key":13950,"store":"Friday Harbor Market Place","cost":57.76,"notes":"","billtypekey":7,"dayofmonth":1,"month":7,"year":2017}
-func getPurchasesFromOldSite() []PurchaseResponse {
-	var purchasURL = "http://moneyreport.sjcmmsn.com/index.php/services/getPurchases"
+func getPurchasesFromOldSite(oldMoneyReportBaseURL string) []PurchaseResponse {
+	var purchasURL = oldMoneyReportBaseURL + "index.php/services/getPurchases"
 	resp, err := http.PostForm(purchasURL, url.Values{"startmonth": {"7"}, "startdaymonth": {"1"}, "startyear": {"2000"}, "endmonth": {"9"}, "enddaymonth": {"1"}, "endyear": {"2020"}})
 	if err != nil {
 		panic(err)
@@ -135,8 +136,8 @@ func getPurchasesFromOldSite() []PurchaseResponse {
 	return *purchases
 }
 
-func loadBillTypes(esClient *eshelp.ElasticSearchClient) {
-	var oldBillTypesURL = "http://moneyreport.sjcmmsn.com/index.php/services/getBillTypes"
+func loadBillTypes(esClient *eshelp.ElasticSearchClient, oldMoneyReportBaseURL string) {
+	var oldBillTypesURL = oldMoneyReportBaseURL + "/index.php/services/getBillTypes"
 	fmt.Println("Transfering BillTypes")
 	var indexName = "bill-type"
 	var indexTypeName = "all"
