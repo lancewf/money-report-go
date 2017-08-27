@@ -2,3 +2,4 @@ results/
 debug
 src
 vendor
+elasticsearch/data
