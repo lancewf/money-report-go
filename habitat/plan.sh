@@ -1,4 +1,4 @@
-pkg_name=moeney-report-go
+pkg_name=money-report-go
 pkg_description="Money report with a go backend"
 pkg_origin=lancewf
 pkg_version=$(cat "$PLAN_CONTEXT/../VERSION")
@@ -17,7 +17,7 @@ pkg_binds_optional=(
 pkg_deps=(core/musl)
 pkg_bin_dirs=(bin)
 pkg_scaffolding=afiune/scaffolding-go
-scaffolding_go_base_path=github.com/chef
+scaffolding_go_base_path=github.com/lancewf
 scaffolding_go_build_deps=(
   github.com/golang/dep/cmd/dep
 )

@@ -9,7 +9,7 @@
 
 export PORT=$(cat $TOML_FILE | grep port | awk '{ print $NF }')
 export HOST=$(cat $TOML_FILE | grep host | awk '{ print $NF }' | tr -d '"')
-# If the `cfg.service.host` setting is empty, default to `converge-service`
+# If the `cfg.service.host` setting is empty, default to `money-report`
 [[ "${HOST}" == "" ]] && export HOST="money-report"
 export ELASTICSEARCH_URL=$(cat $TOML_FILE | grep url | awk '{ print $NF }'| tr -d '"')
 export ES_PORT=$(echo $ELASTICSEARCH_URL | awk -F: '{ print $NF }')
@@ -117,7 +117,7 @@ function start {
   hab svc start $HAB_ORIGIN/$pkg_name --strategy at-once --bind elasticsearch:elasticsearch.default
   # wait for our service to start listening
   wait_for_port_to_listen $PORT
-  # configure the converge-service host inside our studio
+  # configure the service host inside our studio
   configure_host $HOST $PORT
 }
 
@@ -148,11 +148,11 @@ go_build
 go_debug_mode
   Runs the $pkg_name in debug mode inside the studio.
 go_debug_server
-  Starts a headless Delve Server to remotely debug the converge-service.
+  Starts a headless Delve Server to remotely debug the money-report.
 go_debug_attach_running_service
   Attach to a running $pkg_name and begin debugging inside the studio.
-generate_elasticsearch_data
-  Generates 100 nodes in elasticsearch for querying against.
+fill_elasticsearch_data
+  fill elasticsearch with data from the live money report.
 clean_cache
   Cleans your habitat cache. (Removes the directory /hab/cache/src)
 
@@ -167,7 +167,6 @@ DEVHELP
 #   - Verify that the GO_PKG_SRC path exists
 #   - Start the headless Delve Server in port :2345
 #
-# There is alreay a vs code configuration checked in that the converge team
 # can use, it is stored under `.vscode/launch.json`
 function go_debug_server {
   # Setup the studio as a dev environment if it is not already set
@@ -281,7 +280,7 @@ function run_go_test() {
 # Exports the GO_PACKAGES environment variable
 function export_go_packages {
   export GO_PACKAGES=$(go list ./... | grep -v vendor)
-  export GO_PACKAGES_DIR=$(go list -f '{{.Dir}}' ./... | grep -v vendor | awk -F'converge-service' '{ print "."$2 }')
+  export GO_PACKAGES_DIR=$(go list -f '{{.Dir}}' ./... | grep -v vendor | awk -F'money-report-go' '{ print "."$2 }')
 }
 
 function go_build {
@@ -322,7 +321,7 @@ function install_go_dependencies {
   export GO_LDFLAGS="-linkmode external -extldflags '-static'"
 
   # Lets link the 'ps' binary from busybox-static so we can
-  # attach to a running converge-service
+  # attach to a running money-report
   # TODO: Do we want everything tha comes inside busybox?
   hab pkg binlink core/busybox-static ps
   # Also 'gcc' to pull down static linked binaries
@@ -365,12 +364,11 @@ function setup_dev_environment {
   export HAB_DEV_ENV=true
 }
 
-function generate_elasticsearch_data {
+function fill_elasticsearch_data {
   pushd /src >/dev/null
   curl -XPUT -H "Content-Type: application/json" --upload-file data/mappings/bill-type.json $ELASTICSEARCH_URL/bill-type
   curl -XPUT -H "Content-Type: application/json" --upload-file data/mappings/allocated-amounts.json $ELASTICSEARCH_URL/allocated-amounts
   curl -XPUT -H "Content-Type: application/json" --upload-file data/mappings/purchase.json $ELASTICSEARCH_URL/purchases
-  go run data/database_setup.go
   popd >/dev/null
 }
 

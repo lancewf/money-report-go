@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 
 	"github.com/lancewf/money-report-go/eshelp"
@@ -57,27 +58,41 @@ type AllocatedAmountEs struct {
 }
 
 func main() {
-	loadAllocatedAmounts("http://elasticsearch:9200")
-	loadPurchases("http://elasticsearch:9200")
-	loadBillTypes("http://elasticsearch:9200")
+	esURL := os.Getenv("ELASTICSEARCH_URL")
+	fmt.Printf("esURL: %s\n", esURL)
+	esClient := eshelp.NewElasticSearchClient(esURL)
+
+	loadAllocatedAmounts(esClient)
+	loadBillTypes(esClient)
+	loadPurchases(esClient)
 }
 
-func loadAllocatedAmounts(esURL string) {
+func readMappingFile(fileName string) string {
+	fileBytes, error := ioutil.ReadFile(fileName)
+	if error != nil {
+		panic(error)
+	}
+	return string(fileBytes)
+}
+
+func loadAllocatedAmounts(esClient *eshelp.ElasticSearchClient) {
 	fmt.Println("Transfering AllocatedAmounts")
 	var indexName = "allocated-amounts"
 	var indexTypeName = "all"
 
-	allocatedAmounts := getAllocatedAmountsFromOldSite()
+	if !esClient.IndexExists(indexName) {
+		mappingText := readMappingFile("./data/mappings/allocated-amounts.json")
+		fmt.Println("creating index")
+		esClient.CreateIndex(indexName)
+		fmt.Println("adding mapping")
+		esClient.CreateMapping(indexName, indexTypeName, mappingText)
 
-	esClient := eshelp.NewElasticSearchClient(esURL)
-
-	esClient.CreateIndex(indexName)
-
-	for _, a := range allocatedAmounts {
-		start := time.Date(a.StartYear, time.Month(a.StartMonth), a.StartDayofmonth, 0, 0, 0, 0, time.UTC)
-		end := time.Date(a.EndYear, time.Month(a.EndMonth), a.EndDayofmonth, 0, 0, 0, 0, time.UTC)
-		aes := AllocatedAmountEs{a.Amount, a.Billtypekey, start, end}
-		esClient.CreateDoc(indexName, indexTypeName, aes)
+		for _, a := range getAllocatedAmountsFromOldSite() {
+			start := time.Date(a.StartYear, time.Month(a.StartMonth), a.StartDayofmonth, 0, 0, 0, 0, time.UTC)
+			end := time.Date(a.EndYear, time.Month(a.EndMonth), a.EndDayofmonth, 0, 0, 0, 0, time.UTC)
+			aes := AllocatedAmountEs{a.Amount, a.Billtypekey, start, end}
+			esClient.CreateDoc(indexName, indexTypeName, aes)
+		}
 	}
 }
 
@@ -96,28 +111,30 @@ func getAllocatedAmountsFromOldSite() []AllocatedAmountResponse {
 	return *allocatedAmounts
 }
 
-func loadPurchases(esURL string) {
+func loadPurchases(esClient *eshelp.ElasticSearchClient) {
 	fmt.Println("Transfering PurchasesFromOldSite")
 	var indexName = "purchases"
 	var indexTypeName = "all"
 
-	purchases := getPurchasesFromOldSite()
+	if !esClient.IndexExists(indexName) {
+		fmt.Println("creating index")
+		esClient.CreateIndex(indexName)
+		fmt.Println("adding mapping")
+		mappingText := readMappingFile("./data/mappings/purchase.json")
+		esClient.CreateMapping(indexName, indexTypeName, mappingText)
 
-	esClient := eshelp.NewElasticSearchClient(esURL)
-
-	esClient.CreateIndex(indexName)
-
-	for _, p := range purchases {
-		date := time.Date(p.Year, time.Month(p.Month), p.Dayofmonth, 0, 0, 0, 0, time.UTC)
-		pes := PurchaseResponseEs{p.Store, p.Cost, p.Notes, p.Billtypekey, date}
-		esClient.CreateDoc(indexName, indexTypeName, pes)
+		for _, p := range getPurchasesFromOldSite() {
+			date := time.Date(p.Year, time.Month(p.Month), p.Dayofmonth, 0, 0, 0, 0, time.UTC)
+			pes := PurchaseResponseEs{p.Store, p.Cost, p.Notes, p.Billtypekey, date}
+			esClient.CreateDoc(indexName, indexTypeName, pes)
+		}
 	}
 }
 
 //{"key":13950,"store":"Friday Harbor Market Place","cost":57.76,"notes":"","billtypekey":7,"dayofmonth":1,"month":7,"year":2017}
 func getPurchasesFromOldSite() []PurchaseResponse {
 	var purchasURL = "http://moneyreport.sjcmmsn.com/index.php/services/getPurchases"
-	resp, err := http.PostForm(purchasURL, url.Values{"startmonth": {"7"}, "startdaymonth": {"1"}, "startyear": {"2000"}, "endmonth": {"9"}, "enddaymonth": {"1"}, "endyear": {"2017"}})
+	resp, err := http.PostForm(purchasURL, url.Values{"startmonth": {"7"}, "startdaymonth": {"1"}, "startyear": {"2000"}, "endmonth": {"9"}, "enddaymonth": {"1"}, "endyear": {"2020"}})
 	if err != nil {
 		panic(err)
 	}
@@ -130,20 +147,22 @@ func getPurchasesFromOldSite() []PurchaseResponse {
 	return *purchases
 }
 
-func loadBillTypes(esURL string) {
+func loadBillTypes(esClient *eshelp.ElasticSearchClient) {
 	var oldBillTypesURL = "http://moneyreport.sjcmmsn.com/index.php/services/getBillTypes"
 	fmt.Println("Transfering BillTypes")
 	var indexName = "bill-type"
 	var indexTypeName = "all"
 
-	billTypes := getBillTypesFromOldSite(oldBillTypesURL)
+	if !esClient.IndexExists(indexName) {
+		fmt.Println("creating index")
+		esClient.CreateIndex(indexName)
+		fmt.Println("adding mapping")
+		mappingText := readMappingFile("./data/mappings/bill-type.json")
+		esClient.CreateMapping(indexName, indexTypeName, mappingText)
 
-	esClient := eshelp.NewElasticSearchClient(esURL)
-
-	esClient.CreateIndex(indexName)
-
-	for _, bt := range billTypes {
-		esClient.CreateDoc(indexName, indexTypeName, bt)
+		for _, bt := range getBillTypesFromOldSite(oldBillTypesURL) {
+			esClient.CreateDoc(indexName, indexTypeName, bt)
+		}
 	}
 }
 

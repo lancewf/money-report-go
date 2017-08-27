@@ -20,4 +20,4 @@ BACKEND="--backend {{cfg.service.backend}} --elasticsearch-url {{cfg.elasticsear
 {{~/eachAlive}}
 
 # Start our service
-exec converge-service start ${CONFIG} ${BACKEND}
+exec money-report-go start ${CONFIG} ${BACKEND}

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"reflect"
 	"time"
 
@@ -29,7 +30,7 @@ func main() {
 	r := gin.Default()
 	r.GET("/bill_types", test)
 	r.GET("/purchases", purchaseSearch)
-	r.Run()
+	r.Run("0.0.0.0:1234")
 }
 
 func purchaseSearch(c *gin.Context) {
@@ -39,10 +40,9 @@ func purchaseSearch(c *gin.Context) {
 	costGte := c.DefaultQuery("cost_gte", "none")
 	costLt := c.DefaultQuery("cost_lt", "none")
 
-	esClient, err := elastic.NewClient(
-		elastic.SetURL("http://elasticsearch:9200"),
-		elastic.SetSniff(false),
-	)
+	esURL := os.Getenv("ELASTICSEARCH_URL")
+
+	esClient, err := elastic.NewClient(elastic.SetURL(esURL), elastic.SetSniff(false), elastic.SetHealthcheck(false))
 	if err != nil {
 		fmt.Printf("Could not create elasticsearch client %s\n", err)
 	}
@@ -104,10 +104,8 @@ func purchaseSearch(c *gin.Context) {
 }
 
 func test(c *gin.Context) {
-	esClient, err := elastic.NewClient(
-		elastic.SetURL("http://elasticsearch:9200"),
-		elastic.SetSniff(false),
-	)
+	esURL := os.Getenv("ELASTICSEARCH_URL")
+	esClient, err := elastic.NewClient(elastic.SetURL(esURL), elastic.SetSniff(false), elastic.SetHealthcheck(false))
 
 	if err != nil {
 		fmt.Printf("Could not create elasticsearch client %s\n", err)

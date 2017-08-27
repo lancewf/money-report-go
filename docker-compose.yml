@@ -1,0 +1,22 @@
+version: '2'
+services:
+  report:
+   image: lancewf/money-report-go
+   command: "start lancewf/money-report-go"
+   ports:
+     - "8080:8080"
+   depends_on:
+     - elasticsearch
+  elasticsearch:
+    image: afiune/elasticsearch
+    volumes:
+    - ./elasticsearch/data:/hab/svc/elasticsearch/data
+    environment:
+      HAB_ELASTICSEARCH: |
+        [cluster]
+        name = "chef-insights"
+        [network]
+        host = "0.0.0.0"
+    ports:
+    - "9200:9200"
+    - "9300:9300"
